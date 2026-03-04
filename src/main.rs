@@ -1,5 +1,5 @@
 use c4_solver::game::Game;
-use c4_solver::player::{HumanPlayer, RandomPlayer};
+use c4_solver::player::{ComputerPlayer, Difficulty, HumanPlayer};
 use c4_solver::display;
 use std::io::{self, BufRead, Write};
 
@@ -10,7 +10,15 @@ fn main() {
         let game_mode = select_mode();
         let mut game = match game_mode {
             Mode::HumanVsHuman => Game::new(Box::new(HumanPlayer), Box::new(HumanPlayer)),
-            Mode::HumanVsComputer => Game::new(Box::new(HumanPlayer), Box::new(RandomPlayer)),
+            Mode::HumanVsComputer => {
+                let difficulty = select_difficulty();
+                let human_color = select_color();
+                let computer = ComputerPlayer::new(difficulty);
+                match human_color {
+                    HumanColor::Red => Game::new(Box::new(HumanPlayer), Box::new(computer)),
+                    HumanColor::Yellow => Game::new(Box::new(computer), Box::new(HumanPlayer)),
+                }
+            }
         };
         game.run();
 
@@ -24,6 +32,11 @@ fn main() {
 enum Mode {
     HumanVsHuman,
     HumanVsComputer,
+}
+
+enum HumanColor {
+    Red,
+    Yellow,
 }
 
 fn select_mode() -> Mode {
@@ -42,6 +55,41 @@ fn select_mode() -> Mode {
         match line.trim() {
             "1" => return Mode::HumanVsHuman,
             "2" => return Mode::HumanVsComputer,
+            _ => println!("Please enter 1 or 2."),
+        }
+    }
+}
+
+fn select_difficulty() -> Difficulty {
+    let stdin = io::stdin();
+    loop {
+        display::print_difficulty_menu();
+
+        let mut line = String::new();
+        if stdin.lock().read_line(&mut line).is_err() {
+            continue;
+        }
+        match line.trim() {
+            "1" => return Difficulty::Easy,
+            "2" => return Difficulty::Normal,
+            "3" => return Difficulty::Hard,
+            _ => println!("Please enter 1, 2, or 3."),
+        }
+    }
+}
+
+fn select_color() -> HumanColor {
+    let stdin = io::stdin();
+    loop {
+        display::print_color_menu();
+
+        let mut line = String::new();
+        if stdin.lock().read_line(&mut line).is_err() {
+            continue;
+        }
+        match line.trim() {
+            "1" => return HumanColor::Red,
+            "2" => return HumanColor::Yellow,
             _ => println!("Please enter 1 or 2."),
         }
     }

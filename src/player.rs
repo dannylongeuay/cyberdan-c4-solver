@@ -1,6 +1,6 @@
 use crate::bitboard::Bitboard;
 use crate::display;
-use rand::seq::SliceRandom;
+use crate::solver;
 use std::io::{self, BufRead};
 
 /// A controller that chooses which column to play.
@@ -36,13 +36,41 @@ impl PlayerController for HumanPlayer {
     }
 }
 
-/// Computer player: picks a random valid column.
-pub struct RandomPlayer;
+/// Difficulty levels for the computer player.
+#[derive(Debug, Clone, Copy)]
+pub enum Difficulty {
+    Easy,
+    Normal,
+    Hard,
+}
 
-impl PlayerController for RandomPlayer {
+impl Difficulty {
+    /// Returns the search depth for this difficulty level.
+    fn depth(self) -> u32 {
+        match self {
+            Difficulty::Easy => 3,
+            Difficulty::Normal => 9,
+            Difficulty::Hard => 12,
+        }
+    }
+}
+
+/// Computer player: uses negamax solver with configurable difficulty.
+pub struct ComputerPlayer {
+    depth: u32,
+}
+
+impl ComputerPlayer {
+    pub fn new(difficulty: Difficulty) -> Self {
+        ComputerPlayer {
+            depth: difficulty.depth(),
+        }
+    }
+}
+
+impl PlayerController for ComputerPlayer {
     fn choose_column(&self, board: &Bitboard) -> usize {
-        let valid = board.valid_columns();
-        let mut rng = rand::thread_rng();
-        *valid.choose(&mut rng).expect("no valid columns")
+        display::print_thinking();
+        solver::best_move(board, self.depth)
     }
 }

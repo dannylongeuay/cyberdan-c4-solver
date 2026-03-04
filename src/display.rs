@@ -69,6 +69,32 @@ pub fn print_welcome() {
     println!();
 }
 
+/// Prints the difficulty selection menu.
+pub fn print_difficulty_menu() {
+    println!("Select difficulty:");
+    println!("  1) Easy");
+    println!("  2) Normal");
+    println!("  3) Hard");
+    print!("Choice: ");
+    use std::io::Write;
+    std::io::stdout().flush().ok();
+}
+
+/// Prints the color selection menu.
+pub fn print_color_menu() {
+    println!("Choose your color:");
+    println!("  1) {RED}Red{RESET} (plays first)");
+    println!("  2) {YELLOW}Yellow{RESET} (plays second)");
+    print!("Choice: ");
+    use std::io::Write;
+    std::io::stdout().flush().ok();
+}
+
+/// Prints a "thinking" indicator for the computer player.
+pub fn print_thinking() {
+    println!("Computer is thinking...");
+}
+
 fn player_style(player: Player) -> (&'static str, &'static str) {
     match player {
         Player::Red => (RED, "Red"),

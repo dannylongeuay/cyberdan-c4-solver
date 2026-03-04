@@ -61,6 +61,16 @@ impl Bitboard {
         self.moves
     }
 
+    /// Returns the current player's piece bitmask.
+    pub fn position_mask(&self) -> u64 {
+        self.position
+    }
+
+    /// Returns the bitmask of all pieces on the board.
+    pub fn all_mask(&self) -> u64 {
+        self.mask
+    }
+
     /// Returns whether a move can be played in the given column.
     pub fn can_play(&self, col: usize) -> bool {
         if col >= WIDTH {
