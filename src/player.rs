@@ -2,6 +2,7 @@ use crate::bitboard::Bitboard;
 use crate::display;
 use crate::solver;
 use std::io::{self, BufRead};
+use std::time::Duration;
 
 /// A controller that chooses which column to play.
 pub trait PlayerController {
@@ -50,7 +51,7 @@ impl Difficulty {
         match self {
             Difficulty::Easy => 3,
             Difficulty::Normal => 9,
-            Difficulty::Hard => 12,
+            Difficulty::Hard => 18,
         }
     }
 }
@@ -58,12 +59,14 @@ impl Difficulty {
 /// Computer player: uses negamax solver with configurable difficulty.
 pub struct ComputerPlayer {
     depth: u32,
+    timeout: Duration,
 }
 
 impl ComputerPlayer {
-    pub fn new(difficulty: Difficulty) -> Self {
+    pub fn new(difficulty: Difficulty, timeout: Duration) -> Self {
         ComputerPlayer {
             depth: difficulty.depth(),
+            timeout,
         }
     }
 }
@@ -71,6 +74,6 @@ impl ComputerPlayer {
 impl PlayerController for ComputerPlayer {
     fn choose_column(&self, board: &Bitboard) -> usize {
         display::print_thinking();
-        solver::best_move(board, self.depth)
+        solver::best_move(board, self.depth, self.timeout)
     }
 }

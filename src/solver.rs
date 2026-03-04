@@ -1,10 +1,14 @@
 use crate::bitboard::{Bitboard, HEIGHT, WIDTH};
+use std::time::{Duration, Instant};
 
 /// Column exploration order: center-first for better alpha-beta pruning.
 const COLUMN_ORDER: [usize; WIDTH] = [3, 2, 4, 1, 5, 0, 6];
 
 /// Maximum possible score (win on the first move).
 const MAX_SCORE: i32 = (WIDTH * HEIGHT) as i32 / 2;
+
+/// How often to check the clock (amortizes Instant::now() cost).
+const CHECK_INTERVAL: u64 = 1024;
 
 /// Positional weight table: approximates how many 4-in-a-row lines pass through each cell.
 /// Indexed as [col][row] where row 0 is the bottom.
@@ -17,6 +21,19 @@ const POSITION_WEIGHTS: [[i32; HEIGHT]; WIDTH] = [
     [4, 6, 8, 8, 6, 4],
     [3, 4, 5, 5, 4, 3],
 ];
+
+/// Mutable state threaded through the search tree.
+struct SearchState {
+    deadline: Instant,
+    node_count: u64,
+    timed_out: bool,
+}
+
+/// Result of a completed root-level search at a given depth.
+struct SearchResult {
+    best_col: usize,
+    best_score: i32,
+}
 
 /// Evaluate the board position from the current player's perspective.
 fn evaluate(board: &Bitboard) -> i32 {
@@ -38,10 +55,20 @@ fn evaluate(board: &Bitboard) -> i32 {
     score
 }
 
-/// Negamax with alpha-beta pruning.
+/// Negamax with alpha-beta pruning and timeout support.
 ///
 /// Returns a score from the current player's perspective.
-fn negamax(board: &Bitboard, depth: u32, mut alpha: i32, beta: i32) -> i32 {
+/// If `state.timed_out` is set, returns a dummy value (0) and the caller
+/// must discard the entire depth's result.
+fn negamax(board: &Bitboard, depth: u32, mut alpha: i32, beta: i32, state: &mut SearchState) -> i32 {
+    state.node_count += 1;
+    if state.node_count % CHECK_INTERVAL == 0 && Instant::now() >= state.deadline {
+        state.timed_out = true;
+    }
+    if state.timed_out {
+        return 0;
+    }
+
     // Check if the previous player just won (after play() swapped perspective).
     if board.is_winning() {
         return -(MAX_SCORE - board.move_count() as i32 / 2);
@@ -67,7 +94,10 @@ fn negamax(board: &Bitboard, depth: u32, mut alpha: i32, beta: i32) -> i32 {
         }
         let mut child = *board;
         child.play(col).expect("checked can_play");
-        let score = -negamax(&child, depth - 1, -beta, -alpha);
+        let score = -negamax(&child, depth - 1, -beta, -alpha, state);
+        if state.timed_out {
+            return 0;
+        }
         if score >= beta {
             return score;
         }
@@ -79,10 +109,8 @@ fn negamax(board: &Bitboard, depth: u32, mut alpha: i32, beta: i32) -> i32 {
     alpha
 }
 
-/// Find the best column to play for the current position.
-///
-/// Searches to the given `depth` using negamax with alpha-beta pruning.
-pub fn best_move(board: &Bitboard, depth: u32) -> usize {
+/// Search all root moves at a fixed depth. Returns `None` if the search timed out.
+fn search_at_depth(board: &Bitboard, depth: u32, state: &mut SearchState) -> Option<SearchResult> {
     let mut best_col = COLUMN_ORDER[0];
     let mut best_score = i32::MIN + 1;
 
@@ -92,14 +120,63 @@ pub fn best_move(board: &Bitboard, depth: u32) -> usize {
         }
         let mut child = *board;
         child.play(col).expect("checked can_play");
-        let score = -negamax(&child, depth - 1, -(i32::MAX - 1), -best_score);
+        let score = -negamax(&child, depth - 1, -(i32::MAX - 1), -best_score, state);
+        if state.timed_out {
+            return None;
+        }
         if score > best_score {
             best_score = score;
             best_col = col;
         }
     }
 
-    best_col
+    Some(SearchResult { best_col, best_score })
+}
+
+/// Find the best column to play for the current position.
+///
+/// Uses iterative deepening from depth 1 up to `max_depth`, stopping early
+/// if the timeout is reached. Returns the best move from the deepest fully
+/// completed search.
+pub fn best_move(board: &Bitboard, max_depth: u32, timeout: Duration) -> usize {
+    let mut state = SearchState {
+        deadline: Instant::now() + timeout,
+        node_count: 0,
+        timed_out: false,
+    };
+
+    // Fallback: first playable column in center-first order.
+    let fallback = COLUMN_ORDER.iter().copied().find(|&c| board.can_play(c)).unwrap_or(3);
+    let mut best = SearchResult {
+        best_col: fallback,
+        best_score: i32::MIN + 1,
+    };
+
+    for depth in 1..=max_depth {
+        match search_at_depth(board, depth, &mut state) {
+            Some(result) => {
+                eprintln!(
+                    "  depth {:2}: best_col={} score={:6} nodes={}",
+                    depth, result.best_col + 1, result.best_score, state.node_count
+                );
+                best = result;
+                // Early exit if we found a forced win.
+                if best.best_score >= MAX_SCORE - (board.move_count() as i32 + 1) / 2 {
+                    break;
+                }
+            }
+            None => {
+                eprintln!(
+                    "  depth {:2}: timed out, using depth {} result",
+                    depth,
+                    depth - 1
+                );
+                break;
+            }
+        }
+    }
+
+    best.best_col
 }
 
 #[cfg(test)]
@@ -116,7 +193,7 @@ mod tests {
             board.play(1).unwrap(); // Yellow
         }
         // Red to move, should play col 0 for the win.
-        assert_eq!(best_move(&board, 3), 0);
+        assert_eq!(best_move(&board, 3, Duration::from_secs(30)), 0);
     }
 
     #[test]
@@ -131,7 +208,7 @@ mod tests {
         board.play(1).unwrap(); // R
         board.play(2).unwrap(); // Y
         // Red to move. Yellow threatens col 2 row 3. Red must block.
-        assert_eq!(best_move(&board, 5), 2);
+        assert_eq!(best_move(&board, 5, Duration::from_secs(30)), 2);
     }
 
     #[test]
@@ -143,7 +220,7 @@ mod tests {
     #[test]
     fn prefers_center_on_empty_board() {
         let board = Bitboard::new();
-        let col = best_move(&board, 5);
+        let col = best_move(&board, 5, Duration::from_secs(30));
         // Should prefer center column (3).
         assert_eq!(col, 3);
     }
