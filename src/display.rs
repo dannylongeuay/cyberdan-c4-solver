@@ -20,8 +20,8 @@ pub fn print_board(board: &Bitboard) {
         print!(" ");
         for col in 0..WIDTH {
             match board.piece_at(col, row) {
-                Some(Player::Red) => print!("{RED} \u{25cf} {RESET}"),
-                Some(Player::Yellow) => print!("{YELLOW} \u{25cf} {RESET}"),
+                Some(Player::Red) => print!("{RED} R {RESET}"),
+                Some(Player::Yellow) => print!("{YELLOW} Y {RESET}"),
                 None => print!(" \u{00b7} "),
             }
         }

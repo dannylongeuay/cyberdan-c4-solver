@@ -4,8 +4,9 @@ use std::time::{Duration, Instant};
 /// Column exploration order: center-first for better alpha-beta pruning.
 const COLUMN_ORDER: [usize; WIDTH] = [3, 2, 4, 1, 5, 0, 6];
 
-/// Maximum possible score (win on the first move).
-const MAX_SCORE: i32 = (WIDTH * HEIGHT) as i32 / 2;
+/// Win score offset, kept well above the heuristic evaluation range (~±276)
+/// so that win/loss scores never overlap with positional scores.
+const WIN_SCORE: i32 = 1_000;
 
 /// How often to check the clock (amortizes Instant::now() cost).
 const CHECK_INTERVAL: u64 = 1024;
@@ -60,7 +61,13 @@ fn evaluate(board: &Bitboard) -> i32 {
 /// Returns a score from the current player's perspective.
 /// If `state.timed_out` is set, returns a dummy value (0) and the caller
 /// must discard the entire depth's result.
-fn negamax(board: &Bitboard, depth: u32, mut alpha: i32, beta: i32, state: &mut SearchState) -> i32 {
+fn negamax(
+    board: &Bitboard,
+    depth: u32,
+    mut alpha: i32,
+    beta: i32,
+    state: &mut SearchState,
+) -> i32 {
     state.node_count += 1;
     if state.node_count % CHECK_INTERVAL == 0 && Instant::now() >= state.deadline {
         state.timed_out = true;
@@ -71,7 +78,7 @@ fn negamax(board: &Bitboard, depth: u32, mut alpha: i32, beta: i32, state: &mut 
 
     // Check if the previous player just won (after play() swapped perspective).
     if board.is_winning() {
-        return -(MAX_SCORE - board.move_count() as i32 / 2);
+        return -(WIN_SCORE - board.move_count() as i32 / 2);
     }
 
     if board.is_draw() {
@@ -83,7 +90,7 @@ fn negamax(board: &Bitboard, depth: u32, mut alpha: i32, beta: i32, state: &mut 
     }
 
     // Upper bound pruning: best we can do is win on our next move.
-    let max_possible = MAX_SCORE - (board.move_count() as i32 + 1) / 2;
+    let max_possible = WIN_SCORE - (board.move_count() as i32 + 1) / 2;
     if max_possible <= alpha {
         return alpha;
     }
@@ -130,7 +137,10 @@ fn search_at_depth(board: &Bitboard, depth: u32, state: &mut SearchState) -> Opt
         }
     }
 
-    Some(SearchResult { best_col, best_score })
+    Some(SearchResult {
+        best_col,
+        best_score,
+    })
 }
 
 /// Find the best column to play for the current position.
@@ -146,7 +156,11 @@ pub fn best_move(board: &Bitboard, max_depth: u32, timeout: Duration) -> usize {
     };
 
     // Fallback: first playable column in center-first order.
-    let fallback = COLUMN_ORDER.iter().copied().find(|&c| board.can_play(c)).unwrap_or(3);
+    let fallback = COLUMN_ORDER
+        .iter()
+        .copied()
+        .find(|&c| board.can_play(c))
+        .unwrap_or(3);
     let mut best = SearchResult {
         best_col: fallback,
         best_score: i32::MIN + 1,
@@ -157,11 +171,15 @@ pub fn best_move(board: &Bitboard, max_depth: u32, timeout: Duration) -> usize {
             Some(result) => {
                 eprintln!(
                     "  depth {:2}: best_col={} score={:6} nodes={}",
-                    depth, result.best_col + 1, result.best_score, state.node_count
+                    depth,
+                    result.best_col + 1,
+                    result.best_score,
+                    state.node_count
                 );
                 best = result;
                 // Early exit if we found a forced win.
-                if best.best_score >= MAX_SCORE - (board.move_count() as i32 + 1) / 2 {
+                if best.best_score >= WIN_SCORE - (board.move_count() as i32 + 1) / 2 {
+                    eprintln!("  found forced win");
                     break;
                 }
             }
@@ -182,31 +200,37 @@ pub fn best_move(board: &Bitboard, max_depth: u32, timeout: Duration) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bitboard::Player;
 
     #[test]
     fn wins_immediately_when_possible() {
-        // Red has 3 in a row in col 0 (rows 0,1,2), can win by playing col 0 again.
-        let mut board = Bitboard::new();
-        // R:0, Y:1, R:0, Y:1, R:0, Y:1 => Red has 3 in col 0, Yellow has 3 in col 1.
-        for _ in 0..3 {
-            board.play(0).unwrap(); // Red
-            board.play(1).unwrap(); // Yellow
-        }
-        // Red to move, should play col 0 for the win.
+        let board = Bitboard::from_ascii(
+            "
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             R  Y  .  .  .  .  .
+             R  Y  .  .  .  .  .
+             R  Y  .  .  .  .  .
+            ",
+            Player::Red,
+        );
         assert_eq!(best_move(&board, 3, Duration::from_secs(30)), 0);
     }
 
     #[test]
     fn blocks_opponent_win() {
-        // Yellow has 3 in a row in col 2 (rows 0,1,2). Red must block col 2.
-        let mut board = Bitboard::new();
-        // R:0, Y:2, R:0, Y:2, R:1, Y:2 => Yellow has 3 in col 2.
-        board.play(0).unwrap(); // R
-        board.play(2).unwrap(); // Y
-        board.play(0).unwrap(); // R
-        board.play(2).unwrap(); // Y
-        board.play(1).unwrap(); // R
-        board.play(2).unwrap(); // Y
+        let board = Bitboard::from_ascii(
+            "
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  Y  .  .  .  .
+             R  .  Y  .  .  .  .
+             R  R  Y  .  .  .  .
+            ",
+            Player::Red,
+        );
         // Red to move. Yellow threatens col 2 row 3. Red must block.
         assert_eq!(best_move(&board, 5, Duration::from_secs(30)), 2);
     }

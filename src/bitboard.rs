@@ -172,6 +172,67 @@ impl Bitboard {
         }
         false
     }
+
+    /// Parses a visual ASCII board into a `Bitboard`.
+    ///
+    /// Tokens per cell: `R` = Red, `Y` = Yellow, `·` or `.` = empty.
+    /// Lines of digits (column headers) or dashes (footer) are skipped.
+    /// The first content row is the top of the board (row 5), last is the bottom (row 0).
+    ///
+    /// # Panics
+    /// Panics on unrecognised tokens or wrong number of columns in a row.
+    pub fn from_ascii(s: &str, to_move: Player) -> Bitboard {
+        let mut position: u64 = 0;
+        let mut mask: u64 = 0;
+        let mut moves: u32 = 0;
+        let mut row_index = HEIGHT;
+
+        for line in s.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if trimmed.chars().all(|c| c.is_ascii_digit() || c.is_whitespace()) {
+                continue;
+            }
+            if trimmed.chars().all(|c| c == '-' || c.is_whitespace()) {
+                continue;
+            }
+
+            assert!(row_index > 0, "too many content rows");
+            row_index -= 1;
+
+            let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+            assert_eq!(
+                tokens.len(),
+                WIDTH,
+                "expected {WIDTH} tokens, got {}",
+                tokens.len()
+            );
+
+            for (col, token) in tokens.iter().enumerate() {
+                match *token {
+                    "R" | "Y" => {
+                        let bit = 1u64 << (col * (HEIGHT + 1) + row_index);
+                        mask |= bit;
+                        if (*token == "R") == (to_move == Player::Red) {
+                            position |= bit;
+                        }
+                        moves += 1;
+                    }
+                    "\u{00b7}" | "." => {}
+                    other => panic!("unexpected token: {other:?}"),
+                }
+            }
+        }
+
+        Bitboard {
+            position,
+            mask,
+            current: to_move,
+            moves,
+        }
+    }
 }
 
 /// Bottom bit of a column.
@@ -215,13 +276,17 @@ mod tests {
 
     #[test]
     fn vertical_win() {
-        let mut b = Bitboard::new();
-        // Red: col 0, Yellow: col 1, alternating
-        for _ in 0..3 {
-            b.play(0).unwrap(); // Red
-            b.play(1).unwrap(); // Yellow
-        }
-        b.play(0).unwrap(); // Red — 4th in col 0
+        let b = Bitboard::from_ascii(
+            "
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             R  .  .  .  .  .  .
+             R  Y  .  .  .  .  .
+             R  Y  .  .  .  .  .
+             R  Y  .  .  .  .  .
+            ",
+            Player::Yellow,
+        );
         assert!(b.is_winning());
         assert!(b.has_won(Player::Red));
         assert!(!b.has_won(Player::Yellow));
@@ -229,123 +294,70 @@ mod tests {
 
     #[test]
     fn horizontal_win() {
-        let mut b = Bitboard::new();
-        // Red plays cols 0-3 on row 0, Yellow plays same cols on row 1 (offset by one move)
-        // R:0, Y:0, R:1, Y:1, R:2, Y:2, R:3 — Red has bottom row 0,1,2,3
-        b.play(0).unwrap(); // R
-        b.play(0).unwrap(); // Y
-        b.play(1).unwrap(); // R
-        b.play(1).unwrap(); // Y
-        b.play(2).unwrap(); // R
-        b.play(2).unwrap(); // Y
-        b.play(3).unwrap(); // R — horizontal win
+        let b = Bitboard::from_ascii(
+            "
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             Y  Y  Y  .  .  .  .
+             R  R  R  R  .  .  .
+            ",
+            Player::Yellow,
+        );
         assert!(b.is_winning());
         assert!(b.has_won(Player::Red));
     }
 
     #[test]
     fn diagonal_up_right_win() {
-        let mut b = Bitboard::new();
-        // Build a / diagonal for Red at (0,0),(1,1),(2,2),(3,3)
-        // Col 0: R
-        b.play(0).unwrap(); // R at (0,0)
-        // Col 1: Y, R
-        b.play(1).unwrap(); // Y at (1,0)
-        b.play(1).unwrap(); // R at (1,1)
-        // Col 2: Y, Y, R
-        b.play(2).unwrap(); // R at (2,0) — wait, need Yellow fillers
-        // Let me redo this more carefully.
-        let mut b = Bitboard::new();
-        // We need Red at (0,0), (1,1), (2,2), (3,3)
-        // Col 0: [R]
-        // Col 1: [Y, R]
-        // Col 2: [Y, Y, R] — need extra Yellow in col 2
-        // Col 3: [Y, Y, Y, R] — need extra Yellow in col 3
-
-        b.play(0).unwrap(); // R at (0,0)
-        b.play(1).unwrap(); // Y at (1,0)
-        b.play(1).unwrap(); // R at (1,1)
-        b.play(2).unwrap(); // Y at (2,0)
-        b.play(3).unwrap(); // R at (3,0)  — filler
-        b.play(2).unwrap(); // Y at (2,1)
-        b.play(2).unwrap(); // R at (2,2)
-        b.play(3).unwrap(); // Y at (3,1)
-        b.play(4).unwrap(); // R at (4,0)  — filler
-        b.play(3).unwrap(); // Y at (3,2)
-        b.play(3).unwrap(); // R at (3,3)  — diagonal /!
+        // Red / diagonal at (0,0),(1,1),(2,2),(3,3)
+        let b = Bitboard::from_ascii(
+            "
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  R  .  .  .
+             .  .  R  Y  .  .  .
+             .  R  Y  Y  .  .  .
+             R  Y  Y  R  R  .  .
+            ",
+            Player::Yellow,
+        );
         assert!(b.is_winning());
         assert!(b.has_won(Player::Red));
     }
 
     #[test]
     fn diagonal_down_right_win() {
-        let mut b = Bitboard::new();
-        // Build a \ diagonal for Red at (0,3),(1,2),(2,1),(3,0)
-        // Col 0: [Y, Y, Y, R]
-        // Col 1: [Y, Y, R]
-        // Col 2: [Y, R]
-        // Col 3: [R]
-
-        // Fill col 0 with 3 yellows then red on top
-        b.play(3).unwrap(); // R at (3,0)
-        b.play(0).unwrap(); // Y at (0,0)
-        b.play(2).unwrap(); // R at (2,0) — filler
-        b.play(0).unwrap(); // Y at (0,1)
-        b.play(4).unwrap(); // R at (4,0) — filler
-        b.play(0).unwrap(); // Y at (0,2)
-        b.play(0).unwrap(); // R at (0,3)
-        b.play(1).unwrap(); // Y at (1,0)
-        b.play(5).unwrap(); // R at (5,0) — filler
-        b.play(1).unwrap(); // Y at (1,1)
-        b.play(1).unwrap(); // R at (1,2)
-        b.play(2).unwrap(); // Y at (2,1)
-        b.play(2).unwrap(); // R at (2,2) — wait, need (2,1) to be R
-        // This is getting messy, let me plan it properly.
-
-        let mut b = Bitboard::new();
-        // Target: Red at (3,0), (2,1), (1,2), (0,3) — a \ diagonal
-        // Col 3: [R] — just Red at bottom
-        // Col 2: [_, R] — need 1 filler then Red
-        // Col 1: [_, _, R] — need 2 fillers then Red
-        // Col 0: [_, _, _, R] — need 3 fillers then Red
-
-        // Moves (R=Red, Y=Yellow):
-        b.play(3).unwrap(); // R(3,0) — target
-        b.play(2).unwrap(); // Y(2,0) — filler
-        b.play(2).unwrap(); // R(2,1) — target
-        b.play(1).unwrap(); // Y(1,0) — filler
-        b.play(1).unwrap(); // R(1,1) — filler for col 1
-        b.play(0).unwrap(); // Y(0,0) — filler
-        b.play(0).unwrap(); // R(0,1) — filler for col 0
-        b.play(1).unwrap(); // Y(1,2) — oops, this gives Yellow at (1,2), not Red
-        // Let me think again...
-
-        // It's tricky because Yellow is placing fillers too.
-        // Let's use a different approach: just play many moves and verify.
-        let mut b = Bitboard::new();
-        // Use columns 4,5,6 as dumping ground for "waste" moves.
-        // Red targets: (0,3),(1,2),(2,1),(3,0)
-        b.play(3).unwrap(); // R(3,0)
-        b.play(4).unwrap(); // Y(4,0)
-        b.play(2).unwrap(); // R(2,0)
-        b.play(1).unwrap(); // Y(1,0)
-        b.play(2).unwrap(); // R(2,1) — target
-        b.play(0).unwrap(); // Y(0,0)
-        b.play(1).unwrap(); // R(1,1)
-        b.play(0).unwrap(); // Y(0,1)
-        b.play(1).unwrap(); // R(1,2) — target
-        b.play(0).unwrap(); // Y(0,2)
-        b.play(0).unwrap(); // R(0,3) — target! diagonal \
+        // Red \ diagonal at (0,3),(1,2),(2,1),(3,0)
+        let b = Bitboard::from_ascii(
+            "
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             R  .  .  .  .  .  .
+             Y  R  .  .  .  .  .
+             Y  R  R  .  .  .  .
+             Y  Y  R  R  Y  .  .
+            ",
+            Player::Yellow,
+        );
         assert!(b.is_winning());
         assert!(b.has_won(Player::Red));
     }
 
     #[test]
     fn column_full() {
-        let mut b = Bitboard::new();
-        for _ in 0..HEIGHT {
-            b.play(0).unwrap();
-        }
+        let mut b = Bitboard::from_ascii(
+            "
+             Y  .  .  .  .  .  .
+             R  .  .  .  .  .  .
+             Y  .  .  .  .  .  .
+             R  .  .  .  .  .  .
+             Y  .  .  .  .  .  .
+             R  .  .  .  .  .  .
+            ",
+            Player::Red,
+        );
         assert!(!b.can_play(0));
         assert_eq!(b.play(0), Err(MoveError::ColumnFull));
     }
@@ -380,13 +392,82 @@ mod tests {
 
     #[test]
     fn valid_columns_full_board() {
-        let mut b = Bitboard::new();
-        // Fill only column 0
-        for _ in 0..HEIGHT {
-            b.play(0).unwrap();
-        }
+        let b = Bitboard::from_ascii(
+            "
+             Y  .  .  .  .  .  .
+             R  .  .  .  .  .  .
+             Y  .  .  .  .  .  .
+             R  .  .  .  .  .  .
+             Y  .  .  .  .  .  .
+             R  .  .  .  .  .  .
+            ",
+            Player::Red,
+        );
         let valid = b.valid_columns();
         assert!(!valid.contains(&0));
         assert_eq!(valid.len(), WIDTH - 1);
+    }
+
+    #[test]
+    fn from_ascii_empty_board() {
+        let b = Bitboard::from_ascii(
+            "
+             1  2  3  4  5  6  7
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             ---------------------
+            ",
+            Player::Red,
+        );
+        assert_eq!(b, Bitboard::new());
+    }
+
+    #[test]
+    fn from_ascii_single_piece() {
+        let b = Bitboard::from_ascii(
+            "
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  R  .  .  .
+            ",
+            Player::Yellow,
+        );
+        assert_eq!(b.piece_at(3, 0), Some(Player::Red));
+        assert_eq!(b.move_count(), 1);
+        assert_eq!(b.current_player(), Player::Yellow);
+    }
+
+    #[test]
+    fn from_ascii_round_trip() {
+        // Build a board via play() calls
+        let mut expected = Bitboard::new();
+        expected.play(3).unwrap(); // R at (3,0)
+        expected.play(3).unwrap(); // Y at (3,1)
+        expected.play(2).unwrap(); // R at (2,0)
+
+        // Parse the equivalent ASCII (Yellow to move, 3 pieces placed)
+        let parsed = Bitboard::from_ascii(
+            "
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  Y  .  .  .
+             .  .  R  R  .  .  .
+            ",
+            Player::Yellow,
+        );
+
+        assert_eq!(parsed.position_mask(), expected.position_mask());
+        assert_eq!(parsed.all_mask(), expected.all_mask());
+        assert_eq!(parsed.move_count(), expected.move_count());
+        assert_eq!(parsed.current_player(), expected.current_player());
     }
 }
