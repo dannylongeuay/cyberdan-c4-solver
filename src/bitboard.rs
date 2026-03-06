@@ -40,6 +40,12 @@ pub struct Bitboard {
     moves: u32,
 }
 
+impl Default for Bitboard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Bitboard {
     /// Creates a new empty board with Red to move first.
     pub fn new() -> Self {

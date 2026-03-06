@@ -51,8 +51,9 @@ impl PlayerController for HumanPlayer {
 }
 
 /// Difficulty levels for the computer player.
-#[derive(Debug, Clone, Copy, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "api", derive(serde::Deserialize))]
+#[cfg_attr(feature = "api", serde(rename_all = "lowercase"))]
 pub enum Difficulty {
     Easy,
     Normal,

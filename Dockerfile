@@ -4,7 +4,7 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock* ./
 COPY src/ src/
 
-RUN cargo build --release --bin c4-api
+RUN cargo build --release --features api --bin c4-api
 
 FROM debian:bookworm-slim
 
