@@ -1,6 +1,6 @@
 use axum::{
     extract::Json,
-    http::StatusCode,
+    http::{header, HeaderValue, Method, StatusCode},
     response::IntoResponse,
     routing::{get, post},
     Router,
@@ -118,18 +118,26 @@ async fn solve(Json(req): Json<SolveRequest>) -> Result<Json<SolveResponse>, imp
 
 #[tokio::main]
 async fn main() {
+    env_logger::init();
     let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
     let addr = format!("0.0.0.0:{port}");
 
     let app = Router::new()
         .route("/health", get(health))
         .route("/solve", post(solve))
-        .layer(CorsLayer::permissive());
+        .layer(if std::env::var("CORS_PERMISSIVE").is_ok() {
+            CorsLayer::permissive()
+        } else {
+            CorsLayer::new()
+                .allow_origin("http://localhost:3000".parse::<HeaderValue>().unwrap())
+                .allow_methods([Method::GET, Method::POST])
+                .allow_headers([header::CONTENT_TYPE])
+        });
 
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .expect("failed to bind");
 
-    eprintln!("c4-api listening on {addr}");
+    log::info!("c4-api listening on {addr}");
     axum::serve(listener, app).await.expect("server error");
 }

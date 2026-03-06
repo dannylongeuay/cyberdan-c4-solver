@@ -24,6 +24,9 @@ impl Game {
             display::print_board(&self.board);
 
             let player_idx = self.board.move_count() as usize % 2;
+            if !self.players[player_idx].is_human() {
+                display::print_thinking();
+            }
             let col = self.players[player_idx].choose_column(&self.board);
 
             // The controller should only return valid columns, but guard anyway.

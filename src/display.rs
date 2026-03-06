@@ -1,4 +1,5 @@
 use crate::bitboard::{Bitboard, Player, HEIGHT, WIDTH};
+use std::io::Write;
 
 const RED: &str = "\x1b[31m";
 const YELLOW: &str = "\x1b[33m";
@@ -40,7 +41,6 @@ pub fn print_turn(player: Player) {
     let (color, name) = player_style(player);
     print!("{color}{BOLD}{name}{RESET}'s turn. Enter column (1-7): ");
     // Flush stdout so the prompt appears before reading input.
-    use std::io::Write;
     std::io::stdout().flush().ok();
 }
 
@@ -76,7 +76,6 @@ pub fn print_difficulty_menu() {
     println!("  2) Normal");
     println!("  3) Hard");
     print!("Choice: ");
-    use std::io::Write;
     std::io::stdout().flush().ok();
 }
 
@@ -86,7 +85,6 @@ pub fn print_color_menu() {
     println!("  1) {RED}Red{RESET} (plays first)");
     println!("  2) {YELLOW}Yellow{RESET} (plays second)");
     print!("Choice: ");
-    use std::io::Write;
     std::io::stdout().flush().ok();
 }
 

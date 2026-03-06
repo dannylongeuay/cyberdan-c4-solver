@@ -7,12 +7,17 @@ use std::time::Duration;
 /// A controller that chooses which column to play.
 pub trait PlayerController {
     fn choose_column(&self, board: &Bitboard) -> usize;
+    fn is_human(&self) -> bool;
 }
 
 /// Human player: reads column choice from stdin (1-indexed).
 pub struct HumanPlayer;
 
 impl PlayerController for HumanPlayer {
+    fn is_human(&self) -> bool {
+        true
+    }
+
     fn choose_column(&self, board: &Bitboard) -> usize {
         let stdin = io::stdin();
         loop {
@@ -81,8 +86,11 @@ impl ComputerPlayer {
 }
 
 impl PlayerController for ComputerPlayer {
+    fn is_human(&self) -> bool {
+        false
+    }
+
     fn choose_column(&self, board: &Bitboard) -> usize {
-        display::print_thinking();
         solver::best_move(board, self.depth, self.timeout)
     }
 }

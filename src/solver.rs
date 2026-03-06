@@ -1,4 +1,5 @@
 use crate::bitboard::{Bitboard, HEIGHT, WIDTH};
+use log::debug;
 use std::time::{Duration, Instant};
 
 /// Column exploration order: center-first for better alpha-beta pruning.
@@ -169,7 +170,7 @@ pub fn best_move(board: &Bitboard, max_depth: u32, timeout: Duration) -> usize {
     for depth in 1..=max_depth {
         match search_at_depth(board, depth, &mut state) {
             Some(result) => {
-                eprintln!(
+                debug!(
                     "  depth {:2}: best_col={} score={:6} nodes={}",
                     depth,
                     result.best_col + 1,
@@ -179,12 +180,12 @@ pub fn best_move(board: &Bitboard, max_depth: u32, timeout: Duration) -> usize {
                 best = result;
                 // Early exit if we found a forced win.
                 if best.best_score >= WIN_SCORE - (board.move_count() as i32 + 1) / 2 {
-                    eprintln!("  found forced win");
+                    debug!("  found forced win");
                     break;
                 }
             }
             None => {
-                eprintln!(
+                debug!(
                     "  depth {:2}: timed out, using depth {} result",
                     depth,
                     depth - 1

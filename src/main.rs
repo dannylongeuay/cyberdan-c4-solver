@@ -52,6 +52,7 @@ fn parse_args() -> Config {
 }
 
 fn main() {
+    env_logger::init();
     let config = parse_args();
 
     display::print_welcome();
