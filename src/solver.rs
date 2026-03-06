@@ -119,7 +119,7 @@ fn negamax(
 /// Search all root moves at a fixed depth. Returns `None` if the search timed out.
 fn search_at_depth(board: &Bitboard, depth: u32, state: &mut SearchState) -> Option<SearchResult> {
     let mut best_col = COLUMN_ORDER[0];
-    let mut best_score = i32::MIN + 1;
+    let mut alpha = i32::MIN + 1;
 
     for &col in &COLUMN_ORDER {
         if !board.can_play(col) {
@@ -127,19 +127,19 @@ fn search_at_depth(board: &Bitboard, depth: u32, state: &mut SearchState) -> Opt
         }
         let mut child = *board;
         child.play(col).expect("checked can_play");
-        let score = -negamax(&child, depth - 1, -(i32::MAX - 1), -best_score, state);
+        let score = -negamax(&child, depth - 1, -(i32::MAX - 1), -alpha, state);
         if state.timed_out {
             return None;
         }
-        if score > best_score {
-            best_score = score;
+        if score > alpha {
+            alpha = score;
             best_col = col;
         }
     }
 
     Some(SearchResult {
         best_col,
-        best_score,
+        best_score: alpha,
     })
 }
 

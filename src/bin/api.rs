@@ -5,7 +5,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use c4_solver::bitboard::{Bitboard, MoveError, Player, WIDTH};
+use c4_solver::bitboard::{Bitboard, MoveError, WIDTH};
 use c4_solver::player::Difficulty;
 use c4_solver::solver;
 use serde::{Deserialize, Serialize};
@@ -19,35 +19,17 @@ const DEFAULT_TIMEOUT_SECS: f64 = 5.0;
 struct SolveRequest {
     moves: Vec<usize>,
     #[serde(default = "default_difficulty")]
-    difficulty: DifficultyParam,
+    difficulty: Difficulty,
     #[serde(default = "default_timeout")]
     timeout: f64,
 }
 
-fn default_difficulty() -> DifficultyParam {
-    DifficultyParam::Normal
+fn default_difficulty() -> Difficulty {
+    Difficulty::Normal
 }
 
 fn default_timeout() -> f64 {
     DEFAULT_TIMEOUT_SECS
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum DifficultyParam {
-    Easy,
-    Normal,
-    Hard,
-}
-
-impl DifficultyParam {
-    fn into_difficulty(self) -> Difficulty {
-        match self {
-            DifficultyParam::Easy => Difficulty::Easy,
-            DifficultyParam::Normal => Difficulty::Normal,
-            DifficultyParam::Hard => Difficulty::Hard,
-        }
-    }
 }
 
 #[derive(Serialize)]
@@ -109,23 +91,19 @@ async fn solve(Json(req): Json<SolveRequest>) -> Result<Json<SolveResponse>, imp
         }
     }
 
-    let difficulty = req.difficulty.into_difficulty();
-    let depth = difficulty.depth();
+    let depth = req.difficulty.depth();
     let timeout_secs = req.timeout.clamp(0.1, MAX_TIMEOUT_SECS);
     let timeout = Duration::from_secs_f64(timeout_secs);
 
-    let col = solver::best_move(&board, depth, timeout);
+    let col = tokio::task::spawn_blocking(move || solver::best_move(&board, depth, timeout))
+        .await
+        .expect("solver task panicked");
 
     let mut after = board;
     after.play(col).expect("solver returned invalid column");
 
     let status = if after.is_winning() {
-        if after.current_player() == Player::Red {
-            // Yellow just won (current switched to Red after Yellow's move)
-            "win"
-        } else {
-            "win"
-        }
+        "win"
     } else if after.is_draw() {
         "draw"
     } else {

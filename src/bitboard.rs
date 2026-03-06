@@ -372,10 +372,21 @@ mod tests {
 
     #[test]
     fn draw() {
-        // Test the draw detection mechanic by setting moves to the full count.
-        let mut b = Bitboard::new();
-        b.moves = (WIDTH * HEIGHT) as u32;
+        // A valid 42-move draw position (2x2 block pattern, no 4-in-a-row).
+        let b = Bitboard::from_ascii(
+            "
+             Y  Y  R  R  Y  Y  R
+             R  R  Y  Y  R  R  Y
+             Y  Y  R  R  Y  Y  R
+             R  R  Y  Y  R  R  Y
+             Y  Y  R  R  Y  Y  R
+             R  R  Y  Y  R  R  Y
+            ",
+            Player::Red,
+        );
         assert!(b.is_draw());
+        assert!(!b.has_won(Player::Red));
+        assert!(!b.has_won(Player::Yellow));
 
         // A fresh board is not a draw.
         let b2 = Bitboard::new();

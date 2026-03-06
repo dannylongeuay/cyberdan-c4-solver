@@ -89,20 +89,29 @@ enum HumanColor {
     Yellow,
 }
 
-fn select_mode() -> Mode {
+fn prompt_choice(prompt: impl Fn()) -> String {
     let stdin = io::stdin();
     loop {
-        println!("Select mode:");
-        println!("  1) Human vs Human");
-        println!("  2) Human vs Computer");
-        print!("Choice: ");
-        io::stdout().flush().ok();
-
+        prompt();
         let mut line = String::new();
-        if stdin.lock().read_line(&mut line).is_err() {
-            continue;
+        match stdin.lock().read_line(&mut line) {
+            Ok(0) => std::process::exit(0),
+            Ok(_) => return line.trim().to_string(),
+            Err(_) => continue,
         }
-        match line.trim() {
+    }
+}
+
+fn select_mode() -> Mode {
+    loop {
+        let choice = prompt_choice(|| {
+            println!("Select mode:");
+            println!("  1) Human vs Human");
+            println!("  2) Human vs Computer");
+            print!("Choice: ");
+            io::stdout().flush().ok();
+        });
+        match choice.as_str() {
             "1" => return Mode::HumanVsHuman,
             "2" => return Mode::HumanVsComputer,
             _ => println!("Please enter 1 or 2."),
@@ -111,15 +120,9 @@ fn select_mode() -> Mode {
 }
 
 fn select_difficulty() -> Difficulty {
-    let stdin = io::stdin();
     loop {
-        display::print_difficulty_menu();
-
-        let mut line = String::new();
-        if stdin.lock().read_line(&mut line).is_err() {
-            continue;
-        }
-        match line.trim() {
+        let choice = prompt_choice(|| display::print_difficulty_menu());
+        match choice.as_str() {
             "1" => return Difficulty::Easy,
             "2" => return Difficulty::Normal,
             "3" => return Difficulty::Hard,
@@ -129,15 +132,9 @@ fn select_difficulty() -> Difficulty {
 }
 
 fn select_color() -> HumanColor {
-    let stdin = io::stdin();
     loop {
-        display::print_color_menu();
-
-        let mut line = String::new();
-        if stdin.lock().read_line(&mut line).is_err() {
-            continue;
-        }
-        match line.trim() {
+        let choice = prompt_choice(|| display::print_color_menu());
+        match choice.as_str() {
             "1" => return HumanColor::Red,
             "2" => return HumanColor::Yellow,
             _ => println!("Please enter 1 or 2."),
@@ -146,16 +143,12 @@ fn select_color() -> HumanColor {
 }
 
 fn ask_play_again() -> bool {
-    let stdin = io::stdin();
     loop {
-        print!("Play again? (y/n): ");
-        io::stdout().flush().ok();
-
-        let mut line = String::new();
-        if stdin.lock().read_line(&mut line).is_err() {
-            return false;
-        }
-        match line.trim().to_lowercase().as_str() {
+        let choice = prompt_choice(|| {
+            print!("Play again? (y/n): ");
+            io::stdout().flush().ok();
+        });
+        match choice.to_lowercase().as_str() {
             "y" | "yes" => return true,
             "n" | "no" => return false,
             _ => println!("Please enter y or n."),

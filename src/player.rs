@@ -18,9 +18,17 @@ impl PlayerController for HumanPlayer {
         loop {
             display::print_turn(board.current_player());
             let mut line = String::new();
-            if stdin.lock().read_line(&mut line).is_err() || line.trim().is_empty() {
-                display::print_invalid_input("please enter a number 1-7.");
-                continue;
+            match stdin.lock().read_line(&mut line) {
+                Ok(0) => std::process::exit(0),
+                Err(_) => {
+                    display::print_invalid_input("please enter a number 1-7.");
+                    continue;
+                }
+                Ok(_) if line.trim().is_empty() => {
+                    display::print_invalid_input("please enter a number 1-7.");
+                    continue;
+                }
+                Ok(_) => {}
             }
             match line.trim().parse::<usize>() {
                 Ok(n) if (1..=7).contains(&n) => {
@@ -38,7 +46,8 @@ impl PlayerController for HumanPlayer {
 }
 
 /// Difficulty levels for the computer player.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Difficulty {
     Easy,
     Normal,
