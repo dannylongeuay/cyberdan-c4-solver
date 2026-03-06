@@ -129,7 +129,7 @@ async fn main() {
             CorsLayer::permissive()
         } else {
             CorsLayer::new()
-                .allow_origin("http://localhost:3000".parse::<HeaderValue>().unwrap())
+                .allow_origin("https://c4.cyberdan.dev".parse::<HeaderValue>().unwrap())
                 .allow_methods([Method::GET, Method::POST])
                 .allow_headers([header::CONTENT_TYPE])
         });
