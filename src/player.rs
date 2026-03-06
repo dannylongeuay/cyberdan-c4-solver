@@ -47,7 +47,7 @@ pub enum Difficulty {
 
 impl Difficulty {
     /// Returns the search depth for this difficulty level.
-    fn depth(self) -> u32 {
+    pub fn depth(self) -> u32 {
         match self {
             Difficulty::Easy => 3,
             Difficulty::Normal => 9,
