@@ -116,12 +116,15 @@ impl TranspositionTable {
     }
 }
 
+const MAX_PLY: usize = 42;
+
 /// Mutable state threaded through the search tree.
 struct SearchState {
     deadline: Instant,
     node_count: u64,
     timed_out: bool,
     tt: TranspositionTable,
+    killers: [[Option<usize>; 2]; MAX_PLY],
 }
 
 /// Result of a completed root-level search at a given depth.
@@ -153,6 +156,7 @@ fn evaluate(board: &Bitboard) -> i32 {
 fn negamax(
     board: &Bitboard,
     depth: u32,
+    ply: u32,
     mut alpha: i32,
     beta: i32,
     state: &mut SearchState,
@@ -176,6 +180,29 @@ fn negamax(
 
     if depth == 0 {
         return evaluate(board);
+    }
+
+    // Check if current player can win immediately.
+    for &col in &COLUMN_ORDER {
+        if board.is_winning_move(col) {
+            return WIN_SCORE - (board.move_count() as i32 + 1) / 2;
+        }
+    }
+
+    // Detect opponent threats (forced defensive moves).
+    let mut forced_col: Option<usize> = None;
+    let mut threat_count: u32 = 0;
+    for &col in &COLUMN_ORDER {
+        if board.can_play(col) && board.is_opponent_winning_move(col) {
+            if threat_count == 0 {
+                forced_col = Some(col);
+            }
+            threat_count += 1;
+        }
+    }
+    if threat_count > 1 {
+        // Double threat: opponent wins regardless of our move.
+        return -(WIN_SCORE - (board.move_count() as i32 + 2) / 2);
     }
 
     // Upper bound pruning: best we can do is win on our next move.
@@ -214,31 +241,49 @@ fn negamax(
     let mut best_score = i32::MIN + 1;
     let mut best_col: u8 = COLUMN_ORDER[0] as u8;
 
-    // Build move order: TT best move first, then remaining columns.
+    // Build move order: forced move, or TT best → killers → static order.
     let mut move_order = [0usize; WIDTH];
     let mut move_count = 0;
 
-    if let Some(tt_col) = tt_best_move {
-        if tt_col < WIDTH && board.can_play(tt_col) {
-            move_order[move_count] = tt_col;
+    if let Some(fc) = forced_col {
+        // Single threat: only move that prevents immediate loss.
+        move_order[move_count] = fc;
+        move_count += 1;
+    } else {
+        if let Some(tt_col) = tt_best_move {
+            if tt_col < WIDTH && board.can_play(tt_col) {
+                move_order[move_count] = tt_col;
+                move_count += 1;
+            }
+        }
+        // Killer moves (after TT move, before static order).
+        for &killer in &state.killers[ply as usize] {
+            if let Some(k) = killer {
+                if board.can_play(k) && Some(k) != tt_best_move {
+                    move_order[move_count] = k;
+                    move_count += 1;
+                }
+            }
+        }
+        for &col in &COLUMN_ORDER {
+            if Some(col) == tt_best_move {
+                continue;
+            }
+            if state.killers[ply as usize].contains(&Some(col)) {
+                continue;
+            }
+            if !board.can_play(col) {
+                continue;
+            }
+            move_order[move_count] = col;
             move_count += 1;
         }
-    }
-    for &col in &COLUMN_ORDER {
-        if Some(col) == tt_best_move {
-            continue;
-        }
-        if !board.can_play(col) {
-            continue;
-        }
-        move_order[move_count] = col;
-        move_count += 1;
     }
 
     for &col in &move_order[..move_count] {
         let mut child = *board;
         child.play(col).expect("checked can_play");
-        let score = -negamax(&child, depth - 1, -beta, -alpha, state);
+        let score = -negamax(&child, depth - 1, ply + 1, -beta, -alpha, state);
         if state.timed_out {
             return 0;
         }
@@ -247,6 +292,14 @@ fn negamax(
             best_col = col as u8;
         }
         if score >= beta {
+            // Record killer move on beta cutoff.
+            if Some(col) != tt_best_move {
+                let k = &mut state.killers[ply as usize];
+                if k[0] != Some(col) {
+                    k[1] = k[0];
+                    k[0] = Some(col);
+                }
+            }
             break;
         }
         if score > alpha {
@@ -280,28 +333,61 @@ fn search_at_depth(board: &Bitboard, depth: u32, state: &mut SearchState) -> Opt
     let mut best_col = COLUMN_ORDER[0];
     let mut best_score = i32::MIN + 1;
 
-    // Build root move order: TT best move first, then remaining columns.
+    // Check if current player can win immediately.
+    for &col in &COLUMN_ORDER {
+        if board.is_winning_move(col) {
+            return Some(SearchResult {
+                best_col: col,
+                best_score: WIN_SCORE - (board.move_count() as i32 + 1) / 2,
+            });
+        }
+    }
+
+    // Detect opponent threats (forced defensive moves).
+    let mut forced_col: Option<usize> = None;
+    let mut threat_count: u32 = 0;
+    for &col in &COLUMN_ORDER {
+        if board.can_play(col) && board.is_opponent_winning_move(col) {
+            if threat_count == 0 {
+                forced_col = Some(col);
+            }
+            threat_count += 1;
+        }
+    }
+    if threat_count > 1 {
+        return Some(SearchResult {
+            best_col: forced_col.unwrap(),
+            best_score: -(WIN_SCORE - (board.move_count() as i32 + 2) / 2),
+        });
+    }
+
+    // Build root move order: forced move, or TT best → static order.
     let key = board.key();
     let tt_best_move = state.tt.probe(key).map(|e| e.best_move as usize);
 
     let mut move_order = [0usize; WIDTH];
     let mut move_count = 0;
 
-    if let Some(tt_col) = tt_best_move {
-        if tt_col < WIDTH && board.can_play(tt_col) {
-            move_order[move_count] = tt_col;
+    if let Some(fc) = forced_col {
+        move_order[move_count] = fc;
+        move_count += 1;
+    } else {
+        if let Some(tt_col) = tt_best_move {
+            if tt_col < WIDTH && board.can_play(tt_col) {
+                move_order[move_count] = tt_col;
+                move_count += 1;
+            }
+        }
+        for &col in &COLUMN_ORDER {
+            if Some(col) == tt_best_move {
+                continue;
+            }
+            if !board.can_play(col) {
+                continue;
+            }
+            move_order[move_count] = col;
             move_count += 1;
         }
-    }
-    for &col in &COLUMN_ORDER {
-        if Some(col) == tt_best_move {
-            continue;
-        }
-        if !board.can_play(col) {
-            continue;
-        }
-        move_order[move_count] = col;
-        move_count += 1;
     }
 
     let mut alpha = i32::MIN + 1;
@@ -309,7 +395,7 @@ fn search_at_depth(board: &Bitboard, depth: u32, state: &mut SearchState) -> Opt
     for &col in &move_order[..move_count] {
         let mut child = *board;
         child.play(col).expect("checked can_play");
-        let score = -negamax(&child, depth - 1, -(i32::MAX - 1), -alpha, state);
+        let score = -negamax(&child, depth - 1, 1, -(i32::MAX - 1), -alpha, state);
         if state.timed_out {
             return None;
         }
@@ -348,6 +434,7 @@ pub fn best_move(board: &Bitboard, max_depth: u32, timeout: Duration) -> usize {
         node_count: 0,
         timed_out: false,
         tt: TranspositionTable::new(TT_SIZE),
+        killers: [[None; 2]; MAX_PLY],
     };
 
     // Fallback: first playable column in center-first order.
@@ -360,6 +447,13 @@ pub fn best_move(board: &Bitboard, max_depth: u32, timeout: Duration) -> usize {
         best_col: fallback,
         best_score: i32::MIN + 1,
     };
+
+    // Immediate win check: O(7) avoids all iterative deepening overhead.
+    for &col in &COLUMN_ORDER {
+        if board.is_winning_move(col) {
+            return col;
+        }
+    }
 
     for depth in 1..=max_depth {
         match search_at_depth(board, depth, &mut state) {

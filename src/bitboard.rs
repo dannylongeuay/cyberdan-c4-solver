@@ -126,6 +126,27 @@ impl Bitboard {
         Self::has_alignment(opponent)
     }
 
+    /// Returns true if the current player would win by playing in `col`.
+    /// Does not mutate the board. Returns false if the column is full.
+    pub fn is_winning_move(&self, col: usize) -> bool {
+        if !self.can_play(col) {
+            return false;
+        }
+        let new_bit = (self.mask + bottom_mask(col)) & column_mask(col);
+        Self::has_alignment(self.position | new_bit)
+    }
+
+    /// Returns true if the opponent would win if a piece were placed in `col`.
+    /// Used to detect forced defensive moves.
+    pub fn is_opponent_winning_move(&self, col: usize) -> bool {
+        if !self.can_play(col) {
+            return false;
+        }
+        let new_bit = (self.mask + bottom_mask(col)) & column_mask(col);
+        let opponent = self.position ^ self.mask;
+        Self::has_alignment(opponent | new_bit)
+    }
+
     /// Returns true if the given player has won the game.
     pub fn has_won(&self, player: Player) -> bool {
         let pieces = if player == self.current {
@@ -267,6 +288,11 @@ fn bottom_mask(col: usize) -> u64 {
 /// Top playable bit of a column.
 fn top_mask(col: usize) -> u64 {
     1u64 << (col * (HEIGHT + 1) + HEIGHT - 1)
+}
+
+/// All playable bits of a column.
+fn column_mask(col: usize) -> u64 {
+    ((1u64 << HEIGHT) - 1) << (col * (HEIGHT + 1))
 }
 
 #[cfg(test)]
@@ -504,6 +530,102 @@ mod tests {
         assert_eq!(parsed.all_mask(), expected.all_mask());
         assert_eq!(parsed.move_count(), expected.move_count());
         assert_eq!(parsed.current_player(), expected.current_player());
+    }
+
+    #[test]
+    fn is_winning_move_detects_vertical() {
+        let board = Bitboard::from_ascii(
+            "
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             R  Y  .  .  .  .  .
+             R  Y  .  .  .  .  .
+             R  Y  .  .  .  .  .
+            ",
+            Player::Red,
+        );
+        assert!(board.is_winning_move(0));
+        assert!(!board.is_winning_move(1));
+        assert!(!board.is_winning_move(3));
+    }
+
+    #[test]
+    fn is_winning_move_detects_horizontal() {
+        let board = Bitboard::from_ascii(
+            "
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             Y  Y  Y  .  .  .  .
+             R  R  R  .  .  .  .
+            ",
+            Player::Red,
+        );
+        assert!(board.is_winning_move(3));
+        assert!(!board.is_winning_move(4));
+    }
+
+    #[test]
+    fn is_winning_move_full_column_returns_false() {
+        let board = Bitboard::from_ascii(
+            "
+             Y  .  .  .  .  .  .
+             R  .  .  .  .  .  .
+             Y  .  .  .  .  .  .
+             R  .  .  .  .  .  .
+             Y  .  .  .  .  .  .
+             R  .  .  .  .  .  .
+            ",
+            Player::Red,
+        );
+        assert!(!board.is_winning_move(0));
+    }
+
+    #[test]
+    fn is_winning_move_empty_board() {
+        let board = Bitboard::new();
+        for col in 0..WIDTH {
+            assert!(!board.is_winning_move(col));
+        }
+    }
+
+    #[test]
+    fn is_opponent_winning_move_detects_threat() {
+        // Yellow has 3 in col 1, Red to move. Opponent (Yellow) would win in col 1.
+        let board = Bitboard::from_ascii(
+            "
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             R  Y  .  .  .  .  .
+             R  Y  .  .  .  .  .
+             R  Y  .  .  .  .  .
+            ",
+            Player::Red,
+        );
+        assert!(board.is_opponent_winning_move(1));
+        assert!(!board.is_opponent_winning_move(0));
+        assert!(!board.is_opponent_winning_move(3));
+    }
+
+    #[test]
+    fn is_opponent_winning_move_horizontal_threat() {
+        let board = Bitboard::from_ascii(
+            "
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             .  .  .  .  .  .  .
+             R  R  R  .  .  .  .
+             Y  Y  Y  .  .  .  .
+            ",
+            Player::Red,
+        );
+        // Opponent (Yellow) would win by placing in col 3
+        assert!(board.is_opponent_winning_move(3));
+        assert!(!board.is_opponent_winning_move(4));
     }
 
     #[test]
