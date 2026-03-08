@@ -93,9 +93,9 @@ impl Bitboard {
         (self.mask & top_mask(col)) == 0
     }
 
-    /// Returns a list of columns that are not full.
-    pub fn valid_columns(&self) -> Vec<usize> {
-        (0..WIDTH).filter(|&c| self.can_play(c)).collect()
+    /// Returns an iterator over columns that are not full.
+    pub fn valid_columns(&self) -> impl Iterator<Item = usize> + '_ {
+        (0..WIDTH).filter(|&c| self.can_play(c))
     }
 
     /// Plays a piece in the given column.
@@ -464,7 +464,7 @@ mod tests {
             ",
             Player::Red,
         );
-        let valid = b.valid_columns();
+        let valid: Vec<usize> = b.valid_columns().collect();
         assert!(!valid.contains(&0));
         assert_eq!(valid.len(), WIDTH - 1);
     }
