@@ -24,6 +24,36 @@ const POSITION_WEIGHTS: [[i32; HEIGHT]; WIDTH] = [
     [3, 4, 5, 5, 4, 3],
 ];
 
+/// Bit-plane decomposition of POSITION_WEIGHTS for popcount-based evaluation.
+/// Each plane `k` contains a bitmask where bit `(col * (HEIGHT+1) + row)` is set
+/// iff bit `k` of `POSITION_WEIGHTS[col][row]` is set.
+const WEIGHT_PLANES: [u64; 4] = {
+    let mut planes = [0u64; 4];
+    let mut col = 0;
+    while col < WIDTH {
+        let mut row = 0;
+        while row < HEIGHT {
+            let bit = 1u64 << (col * (HEIGHT + 1) + row);
+            let w = POSITION_WEIGHTS[col][row];
+            if w & 1 != 0 {
+                planes[0] |= bit;
+            }
+            if w & 2 != 0 {
+                planes[1] |= bit;
+            }
+            if w & 4 != 0 {
+                planes[2] |= bit;
+            }
+            if w & 8 != 0 {
+                planes[3] |= bit;
+            }
+            row += 1;
+        }
+        col += 1;
+    }
+    planes
+};
+
 /// Number of entries in the transposition table (~16 MB).
 const TT_SIZE: usize = 1 << 20;
 
@@ -101,23 +131,18 @@ struct SearchResult {
 }
 
 /// Evaluate the board position from the current player's perspective.
+///
+/// Uses popcount on bit-plane masks instead of iterating all 42 cells.
 fn evaluate(board: &Bitboard) -> i32 {
     let current = board.position_mask();
     let opponent = current ^ board.all_mask();
-    let mut score: i32 = 0;
-
-    for (col, col_weights) in POSITION_WEIGHTS.iter().enumerate() {
-        for (row, &weight) in col_weights.iter().enumerate() {
-            let bit = 1u64 << (col * (HEIGHT + 1) + row);
-            if current & bit != 0 {
-                score += weight;
-            } else if opponent & bit != 0 {
-                score -= weight;
-            }
-        }
-    }
-
-    score
+    let diff = |plane: u64| -> i32 {
+        (current & plane).count_ones() as i32 - (opponent & plane).count_ones() as i32
+    };
+    diff(WEIGHT_PLANES[0])
+        + 2 * diff(WEIGHT_PLANES[1])
+        + 4 * diff(WEIGHT_PLANES[2])
+        + 8 * diff(WEIGHT_PLANES[3])
 }
 
 /// Negamax with alpha-beta pruning, transposition table, and timeout support.
@@ -417,5 +442,33 @@ mod tests {
         let col = best_move(&board, 5, Duration::from_secs(30));
         // Should prefer center column (3).
         assert_eq!(col, 3);
+    }
+
+    #[test]
+    fn evaluate_single_piece_matches_weight() {
+        // Place one piece in each column and verify the score equals
+        // -POSITION_WEIGHTS[col][0] (negative because after play() the
+        // piece belongs to the opponent from the current player's view).
+        for col in 0..WIDTH {
+            let mut board = Bitboard::new();
+            board.play(col).unwrap();
+            assert_eq!(
+                evaluate(&board),
+                -POSITION_WEIGHTS[col][0],
+                "mismatch for col {}",
+                col
+            );
+        }
+    }
+
+    #[test]
+    fn evaluate_two_pieces_symmetric() {
+        // Red plays center (col 3, weight 7), Yellow plays edge (col 0, weight 3).
+        // After two moves it is Red's turn again. Current player is Red.
+        // Red's piece has weight 7, Yellow's piece has weight 3 → score = 7 - 3 = 4.
+        let mut board = Bitboard::new();
+        board.play(3).unwrap(); // Red in center
+        board.play(0).unwrap(); // Yellow on edge
+        assert_eq!(evaluate(&board), 4);
     }
 }
