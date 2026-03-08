@@ -122,7 +122,7 @@ fn select_mode() -> Mode {
 
 fn select_difficulty() -> Difficulty {
     loop {
-        let choice = prompt_choice(|| display::print_difficulty_menu());
+        let choice = prompt_choice(display::print_difficulty_menu);
         match choice.as_str() {
             "1" => return Difficulty::Easy,
             "2" => return Difficulty::Normal,
@@ -134,7 +134,7 @@ fn select_difficulty() -> Difficulty {
 
 fn select_color() -> HumanColor {
     loop {
-        let choice = prompt_choice(|| display::print_color_menu());
+        let choice = prompt_choice(display::print_color_menu);
         match choice.as_str() {
             "1" => return HumanColor::Red,
             "2" => return HumanColor::Yellow,

@@ -77,6 +77,13 @@ impl Bitboard {
         self.mask
     }
 
+    /// Returns a unique key for this position (Fhourstones encoding).
+    ///
+    /// Always nonzero for any legal position, including an empty board.
+    pub fn key(&self) -> u64 {
+        self.position + self.mask + BOTTOM_MASK
+    }
+
     /// Returns whether a move can be played in the given column.
     pub fn can_play(&self, col: usize) -> bool {
         if col >= WIDTH {
@@ -240,6 +247,17 @@ impl Bitboard {
         }
     }
 }
+
+/// Bottom bit of every column OR'd together (compile-time constant).
+const BOTTOM_MASK: u64 = {
+    let mut mask = 0u64;
+    let mut col = 0;
+    while col < WIDTH {
+        mask |= 1u64 << (col * (HEIGHT + 1));
+        col += 1;
+    }
+    mask
+};
 
 /// Bottom bit of a column.
 fn bottom_mask(col: usize) -> u64 {
@@ -486,5 +504,53 @@ mod tests {
         assert_eq!(parsed.all_mask(), expected.all_mask());
         assert_eq!(parsed.move_count(), expected.move_count());
         assert_eq!(parsed.current_player(), expected.current_player());
+    }
+
+    #[test]
+    fn key_nonzero_for_empty_board() {
+        let b = Bitboard::new();
+        assert_ne!(b.key(), 0);
+    }
+
+    #[test]
+    fn key_differs_for_different_positions() {
+        let mut b1 = Bitboard::new();
+        b1.play(0).unwrap();
+        let mut b2 = Bitboard::new();
+        b2.play(3).unwrap();
+        assert_ne!(b1.key(), b2.key());
+    }
+
+    #[test]
+    fn key_same_for_same_position_via_different_move_orders() {
+        // Play cols 3,2 vs 2,3 — same resulting position.
+        let mut b1 = Bitboard::new();
+        b1.play(3).unwrap(); // R at (3,0)
+        b1.play(2).unwrap(); // Y at (2,0)
+
+        let mut b2 = Bitboard::new();
+        b2.play(2).unwrap(); // R at (2,0)
+        b2.play(3).unwrap(); // Y at (3,0)
+
+        // Different move order but same board state — wait, actually the piece
+        // colors differ here (R/Y swap). For same key, we need a true transposition.
+        // In Connect 4, a transposition requires the same pieces in the same places
+        // AND the same player to move. Let's use a 4-move sequence instead:
+        // Order A: col 0, col 1, col 2, col 3  (R,Y,R,Y)
+        // Order B: col 2, col 1, col 0, col 3  (R,Y,R,Y)
+        // After both: R at (0,0), Y at (1,0), R at (2,0), Y at (3,0)
+        let mut a = Bitboard::new();
+        a.play(0).unwrap();
+        a.play(1).unwrap();
+        a.play(2).unwrap();
+        a.play(3).unwrap();
+
+        let mut b = Bitboard::new();
+        b.play(2).unwrap();
+        b.play(1).unwrap();
+        b.play(0).unwrap();
+        b.play(3).unwrap();
+
+        assert_eq!(a.key(), b.key());
     }
 }

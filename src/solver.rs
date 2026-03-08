@@ -24,11 +24,74 @@ const POSITION_WEIGHTS: [[i32; HEIGHT]; WIDTH] = [
     [3, 4, 5, 5, 4, 3],
 ];
 
+/// Number of entries in the transposition table (~16 MB).
+const TT_SIZE: usize = 1 << 20;
+
+/// Bound type stored in a transposition table entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TTFlag {
+    Exact,
+    LowerBound,
+    UpperBound,
+}
+
+/// A single transposition table entry.
+#[derive(Debug, Clone, Copy)]
+struct TTEntry {
+    key: u64,
+    score: i32,
+    depth: u8,
+    flag: TTFlag,
+    best_move: u8,
+}
+
+impl Default for TTEntry {
+    fn default() -> Self {
+        TTEntry {
+            key: 0,
+            score: 0,
+            depth: 0,
+            flag: TTFlag::Exact,
+            best_move: 0,
+        }
+    }
+}
+
+/// Fixed-size transposition table with always-replace policy.
+struct TranspositionTable {
+    entries: Vec<TTEntry>,
+    mask: usize,
+}
+
+impl TranspositionTable {
+    fn new(size: usize) -> Self {
+        debug_assert!(size.is_power_of_two());
+        TranspositionTable {
+            entries: vec![TTEntry::default(); size],
+            mask: size - 1,
+        }
+    }
+
+    fn probe(&self, key: u64) -> Option<&TTEntry> {
+        let entry = &self.entries[key as usize & self.mask];
+        if entry.key == key {
+            Some(entry)
+        } else {
+            None
+        }
+    }
+
+    fn store(&mut self, entry: TTEntry) {
+        self.entries[entry.key as usize & self.mask] = entry;
+    }
+}
+
 /// Mutable state threaded through the search tree.
 struct SearchState {
     deadline: Instant,
     node_count: u64,
     timed_out: bool,
+    tt: TranspositionTable,
 }
 
 /// Result of a completed root-level search at a given depth.
@@ -43,13 +106,13 @@ fn evaluate(board: &Bitboard) -> i32 {
     let opponent = current ^ board.all_mask();
     let mut score: i32 = 0;
 
-    for col in 0..WIDTH {
-        for row in 0..HEIGHT {
+    for (col, col_weights) in POSITION_WEIGHTS.iter().enumerate() {
+        for (row, &weight) in col_weights.iter().enumerate() {
             let bit = 1u64 << (col * (HEIGHT + 1) + row);
             if current & bit != 0 {
-                score += POSITION_WEIGHTS[col][row];
+                score += weight;
             } else if opponent & bit != 0 {
-                score -= POSITION_WEIGHTS[col][row];
+                score -= weight;
             }
         }
     }
@@ -57,9 +120,9 @@ fn evaluate(board: &Bitboard) -> i32 {
     score
 }
 
-/// Negamax with alpha-beta pruning and timeout support.
+/// Negamax with alpha-beta pruning, transposition table, and timeout support.
 ///
-/// Returns a score from the current player's perspective.
+/// Uses fail-soft: returns `best_score` which may lie outside [alpha, beta].
 /// If `state.timed_out` is set, returns a dummy value (0) and the caller
 /// must discard the entire depth's result.
 fn negamax(
@@ -70,7 +133,7 @@ fn negamax(
     state: &mut SearchState,
 ) -> i32 {
     state.node_count += 1;
-    if state.node_count % CHECK_INTERVAL == 0 && Instant::now() >= state.deadline {
+    if state.node_count.is_multiple_of(CHECK_INTERVAL) && Instant::now() >= state.deadline {
         state.timed_out = true;
     }
     if state.timed_out {
@@ -96,51 +159,156 @@ fn negamax(
         return alpha;
     }
 
+    let key = board.key();
+    let original_alpha = alpha;
+    let mut tt_best_move: Option<usize> = None;
+
+    // Probe TT
+    if let Some(entry) = state.tt.probe(key) {
+        tt_best_move = Some(entry.best_move as usize);
+        if entry.depth as u32 >= depth {
+            match entry.flag {
+                TTFlag::Exact => return entry.score,
+                TTFlag::LowerBound => {
+                    if entry.score >= beta {
+                        return entry.score;
+                    }
+                    if entry.score > alpha {
+                        alpha = entry.score;
+                    }
+                }
+                TTFlag::UpperBound => {
+                    if entry.score <= alpha {
+                        return entry.score;
+                    }
+                }
+            }
+        }
+    }
+
+    let mut best_score = i32::MIN + 1;
+    let mut best_col: u8 = COLUMN_ORDER[0] as u8;
+
+    // Build move order: TT best move first, then remaining columns.
+    let mut move_order = [0usize; WIDTH];
+    let mut move_count = 0;
+
+    if let Some(tt_col) = tt_best_move {
+        if tt_col < WIDTH && board.can_play(tt_col) {
+            move_order[move_count] = tt_col;
+            move_count += 1;
+        }
+    }
     for &col in &COLUMN_ORDER {
+        if Some(col) == tt_best_move {
+            continue;
+        }
         if !board.can_play(col) {
             continue;
         }
+        move_order[move_count] = col;
+        move_count += 1;
+    }
+
+    for &col in &move_order[..move_count] {
         let mut child = *board;
         child.play(col).expect("checked can_play");
         let score = -negamax(&child, depth - 1, -beta, -alpha, state);
         if state.timed_out {
             return 0;
         }
+        if score > best_score {
+            best_score = score;
+            best_col = col as u8;
+        }
         if score >= beta {
-            return score;
+            break;
         }
         if score > alpha {
             alpha = score;
         }
     }
 
-    alpha
+    // Store in TT (skip if timed out).
+    if !state.timed_out {
+        let flag = if best_score <= original_alpha {
+            TTFlag::UpperBound
+        } else if best_score >= beta {
+            TTFlag::LowerBound
+        } else {
+            TTFlag::Exact
+        };
+        state.tt.store(TTEntry {
+            key,
+            score: best_score,
+            depth: depth as u8,
+            flag,
+            best_move: best_col,
+        });
+    }
+
+    best_score
 }
 
 /// Search all root moves at a fixed depth. Returns `None` if the search timed out.
 fn search_at_depth(board: &Bitboard, depth: u32, state: &mut SearchState) -> Option<SearchResult> {
     let mut best_col = COLUMN_ORDER[0];
-    let mut alpha = i32::MIN + 1;
+    let mut best_score = i32::MIN + 1;
 
+    // Build root move order: TT best move first, then remaining columns.
+    let key = board.key();
+    let tt_best_move = state.tt.probe(key).map(|e| e.best_move as usize);
+
+    let mut move_order = [0usize; WIDTH];
+    let mut move_count = 0;
+
+    if let Some(tt_col) = tt_best_move {
+        if tt_col < WIDTH && board.can_play(tt_col) {
+            move_order[move_count] = tt_col;
+            move_count += 1;
+        }
+    }
     for &col in &COLUMN_ORDER {
+        if Some(col) == tt_best_move {
+            continue;
+        }
         if !board.can_play(col) {
             continue;
         }
+        move_order[move_count] = col;
+        move_count += 1;
+    }
+
+    let mut alpha = i32::MIN + 1;
+
+    for &col in &move_order[..move_count] {
         let mut child = *board;
         child.play(col).expect("checked can_play");
         let score = -negamax(&child, depth - 1, -(i32::MAX - 1), -alpha, state);
         if state.timed_out {
             return None;
         }
+        if score > best_score {
+            best_score = score;
+            best_col = col;
+        }
         if score > alpha {
             alpha = score;
-            best_col = col;
         }
     }
 
+    // Store root result as Exact (full window search).
+    state.tt.store(TTEntry {
+        key,
+        score: best_score,
+        depth: depth as u8,
+        flag: TTFlag::Exact,
+        best_move: best_col as u8,
+    });
+
     Some(SearchResult {
         best_col,
-        best_score: alpha,
+        best_score,
     })
 }
 
@@ -154,6 +322,7 @@ pub fn best_move(board: &Bitboard, max_depth: u32, timeout: Duration) -> usize {
         deadline: Instant::now() + timeout,
         node_count: 0,
         timed_out: false,
+        tt: TranspositionTable::new(TT_SIZE),
     };
 
     // Fallback: first playable column in center-first order.
