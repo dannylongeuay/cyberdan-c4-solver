@@ -6,7 +6,7 @@ COPY src/ src/
 
 RUN cargo build --release --features api --bin c4-api
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 COPY --from=builder /app/target/release/c4-api /usr/local/bin/c4-api
 
